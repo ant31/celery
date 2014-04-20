@@ -28,7 +28,7 @@ app = Celery(
     'myapp',
     broker='amqp://guest@localhost//',
     # add result backend here if needed.
-    #backend='rpc'
+    backend='redis'
 )
 
 @app.task()

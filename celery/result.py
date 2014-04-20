@@ -18,6 +18,7 @@ from copy import copy
 from kombu.utils import cached_property
 from kombu.utils.compat import OrderedDict
 
+from celery.canvas import signature
 from . import current_app
 from . import states
 from ._state import _set_task_join_will_block, task_join_will_block
@@ -182,6 +183,32 @@ class AsyncResult(ResultBase):
             yield node
             node = node.parent
 
+    def signature(self, args=None, kwargs=None,
+                  queue=None, **extra_options):
+        request = self.task_request
+        if request is None:
+            return None
+        args = request.args if args is None else args
+        kwargs = request.kwargs if kwargs is None else kwargs
+        limit_hard, limit_soft = request.timelimit or (None, None)
+        options = {
+            #'task_id': request.id,
+            'link': request.callbacks,
+            'link_error': request.errbacks,
+            'group_id': request.group,
+            'chord': request.chord,
+            'soft_time_limit': limit_soft,
+            'time_limit': limit_hard,
+        }
+        options.update(
+            {'queue': queue} if queue else (request.delivery_info or {})
+        )
+        return self.app.signature(self.task_name, args, kwargs, options, **extra_options)
+
+    def retry(self, args=None, kwargs=None,
+                  queue=None, **extra_options):
+        return self.signature(args, kwargs, queue, **extra_options).apply_async()
+
     def collect(self, intermediate=False, **kwargs):
         """Iterator, like :meth:`get` will wait for the task to complete,
         but will also follow :class:`AsyncResult` and :class:`ResultSet`
@@ -322,6 +349,14 @@ class AsyncResult(ResultBase):
     @property
     def children(self):
         return self._get_task_meta().get('children')
+
+    @property
+    def task_request(self):
+        """Get task request object."""
+        meta = self._get_task_meta()
+        if 'request' in meta:
+            return meta['request']
+        return None
 
     def _get_task_meta(self):
         if self._cache is None:
